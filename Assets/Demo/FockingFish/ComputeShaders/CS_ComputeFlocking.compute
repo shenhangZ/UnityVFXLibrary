@@ -23,13 +23,20 @@ float _DeltaTime;
 // Calculate all force
 float3 CalculateForce(float3 forceSum, float3 velocity)
 {
+	// 减去当前粒子的速度`velocity`是将作用力转换为相对于当前粒子速度的差值
+	// 这样做可以让粒子的速度平滑地逼近目标速度，而不是突然改变速度
 	float3 force = forceSum * _SpeedRange.y - velocity;
+	//- 首先，对力矢量进行归一化（使其长度为1），这样只保留方向信息，而不保留大小信息。
+	//- 然后，计算力矢量的长度和设定的最大力之间的较小值。这一步确保力的强度不超过`_MaxForce`。
+	//- 最后，将缩放后的力矢量长度与归一化的方向相乘，得到调整后的力向量。
 	return normalize(force) * min(length(force), _MaxForce);
 }
 
 float3 Flock(in float3 positionA, in float3 velocityA)
 {
+	// 计算每种行为类型（对齐/聚合/分离）的邻居数量
 	int3 numFlockMates = (int3)0;
+	// alignmentSum`, `cohesionSum`, `separationSum` 分别存储对齐、聚合和分离行为的累积状态
 	float3 alignmentSum = (float3)0;
 	float3 cohesionSum = (float3)0;
 	float3 separationSum = (float3)0;
@@ -38,11 +45,15 @@ float3 Flock(in float3 positionA, in float3 velocityA)
 	{
 		float3 positionB = _PositionBuffer[i];
 		float3 velocityB = _VelocityBuffer[i];
+
+		// 计算位置偏移和当前粒子（Agent A）与粒子i（Agent B）之间的距离。如果距离为0，意味着这是相同的粒子。这种情况下跳过这次迭代。
 		float3 offset = positionB - positionA;
 		float distance = length(offset);
-
 		if (distance == 0) continue;
 
+		//  检查当前粒子（Agent A）与粒子i（Agent B）之间的距离与各种行为的感知半径的关系。如果其距离小于特定类型的感知半径，则：
+		//	- 增加该类型的邻居数量。
+		//	- 更新行为状态合计（对齐时使用相邻速度，聚合度时使用位置偏移，在分离时使用-偏移/距离）。
 		if (distance < _PerceptionRadius[alignment])
 		{
 			numFlockMates[alignment]++;
@@ -60,6 +71,10 @@ float3 Flock(in float3 positionA, in float3 velocityA)
 		}
 	}
 
+	//根据行为类型计算加速度结果。对于每种行为（对齐/聚合/分离）：
+	//- 检查是否有匹配该行为的邻居（即检查 `numFlockMates` 的值）。
+	//- 如果有邻居，则调用 `CalculateForce` 函数（未在代码中给出），基于累积行为状态和当前粒子速度计算力。
+	//- 将力与 `_ForceWeight` 相应的行为权重相乘，将其加入最终加速度。
 	float3 acceleration = (float3)0;
 	if (numFlockMates[alignment] > 0)
 	{
@@ -84,6 +99,7 @@ float3 SeekTarget(in float3 positionA, in float3 velocityA)
 {
 	float3 targetDirection = normalize(_TargetPosition - positionA);
 	float distance = length(_TargetPosition - positionA);
+	// 距离限制最大作用力 <= 1
 	float force = min(distance, 1);
 	float3 targetForce = targetDirection * force;
     
@@ -106,8 +122,10 @@ void Flocking(uint3 DTid : SV_DispatchThreadID)
 	acceleration += Flock(position, velocity);
 	acceleration += SeekTarget(position, velocity);
 
-	// Update Velocity
+	// Update Velocity 更新粒子速度
 	velocity += acceleration * _DeltaTime;
+	// 确保粒子的速度按照设定范围进行更新，既不超过最大速度也不低于最小速度。
+	// 如此一来，我们得到了更新后的速度，可以计算粒子在下一个时间点上的位置。
 	velocity = normalize(velocity) * clamp(length(velocity), _SpeedRange.x, _SpeedRange.y);
 
 	position += velocity * _DeltaTime;
